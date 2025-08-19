@@ -15,6 +15,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const eventsRoutes = require('./routes/events');
 const rulesRoutes = require('./routes/rules');
 const searchRoutes = require('./routes/search');
+const reportsRoutes = require('./routes/reports');
 
 
 const app = express();
@@ -44,6 +45,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/rules', rulesRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/reports', reportsRoutes);
 
 
 // Start the server and listen for incoming connections

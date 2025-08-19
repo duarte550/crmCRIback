@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 /**
  * @route   GET /api/watchlist
@@ -9,15 +9,14 @@ const { getConnection } = require('../config/db');
  */
 router.get('/', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request().query(`
+    const result = await executeQuery(`
         SELECT id, name, watchlistStatus, currentVolume 
         FROM crm_cri.EconomicGroups 
         WHERE watchlistStatus IN ('attention', 'problem', 'critical')
     `);
     
     // Add a mock observation based on status for demo purposes
-    const groups = result.recordset.map(g => ({
+    const groups = result.map(g => ({
         ...g,
         lastObservation: g.watchlistStatus === 'critical' 
             ? 'Atraso recorrente no envio de covenants.' 
@@ -38,15 +37,14 @@ router.get('/', async (req, res) => {
  */
 router.get('/summary', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request().query(`
+    const result = await executeQuery(`
         SELECT 
             SUM(CASE WHEN watchlistStatus = 'ok' THEN 1 ELSE 0 END) as ok,
             SUM(CASE WHEN watchlistStatus IN ('attention', 'problem') THEN 1 ELSE 0 END) as attention,
             SUM(CASE WHEN watchlistStatus = 'critical' THEN 1 ELSE 0 END) as critical
         FROM crm_cri.EconomicGroups
     `);
-    res.json(result.recordset[0]);
+    res.json(result[0]);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error while fetching watchlist summary');

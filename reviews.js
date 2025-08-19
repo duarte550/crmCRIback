@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 /**
  * @route   GET /api/reviews
@@ -9,14 +9,13 @@ const { getConnection } = require('../config/db');
  */
 router.get('/', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request().query(`
+    const result = await executeQuery(`
         SELECT r.*, g.name as groupName, g.currentVolume 
         FROM crm_cri.Reviews r
         JOIN crm_cri.EconomicGroups g ON r.groupId = g.id
         ORDER BY r.nextReviewDate ASC
     `);
-    res.json(result.recordset);
+    res.json(result);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error while fetching reviews');

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 /**
  * @route   GET /api/appraisals
@@ -9,14 +9,13 @@ const { getConnection } = require('../config/db');
  */
 router.get('/', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request().query(`
+    const result = await executeQuery(`
         SELECT a.*, g.name as groupName
         FROM crm_cri.Appraisals a
         JOIN crm_cri.EconomicGroups g ON a.groupId = g.id
         ORDER BY a.date DESC
     `);
-    res.json(result.recordset);
+    res.json(result);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error while fetching appraisals');

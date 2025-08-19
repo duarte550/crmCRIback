@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const sql = require('mssql');
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 /**
  * @route   GET /api/search?term=...
@@ -16,14 +15,12 @@ router.get('/', async (req, res) => {
     }
 
     try {
-        const pool = await getConnection();
         const searchTerm = `%${term}%`;
 
         // Search in parallel
         const [groupResults, eventResults] = await Promise.all([
-            pool.request()
-                .input('searchTerm', sql.NVarChar, searchTerm)
-                .query(`
+            executeQuery(
+                `
                     SELECT 
                         id, 
                         name as title, 
@@ -31,11 +28,12 @@ router.get('/', async (req, res) => {
                         description as snippet, 
                         id as groupId
                     FROM crm_cri.EconomicGroups
-                    WHERE name LIKE @searchTerm OR description LIKE @searchTerm
-                `),
-            pool.request()
-                .input('searchTerm', sql.NVarChar, searchTerm)
-                .query(`
+                    WHERE name LIKE ? OR description LIKE ?
+                `,
+                [searchTerm, searchTerm]
+            ),
+            executeQuery(
+                `
                     SELECT 
                         e.id, 
                         e.title, 
@@ -44,13 +42,15 @@ router.get('/', async (req, res) => {
                         e.groupId
                     FROM crm_cri.TimelineEvents e
                     JOIN crm_cri.EconomicGroups g ON e.groupId = g.id
-                    WHERE e.title LIKE @searchTerm OR e.summary LIKE @searchTerm
-                `)
+                    WHERE e.title LIKE ? OR e.summary LIKE ?
+                `,
+                [searchTerm, searchTerm]
+            )
         ]);
 
         res.json({
-            groups: groupResults.recordset,
-            events: eventResults.recordset
+            groups: groupResults,
+            events: eventResults
         });
 
     } catch (err) {

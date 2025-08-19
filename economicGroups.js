@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const sql = require('mssql');
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 /**
  * @route   GET /api/economic-groups
@@ -10,9 +9,8 @@ const { getConnection } = require('../config/db');
  */
 router.get('/', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request().query('SELECT * FROM crm_cri.EconomicGroups ORDER BY name');
-    res.json(result.recordset);
+    const result = await executeQuery('SELECT * FROM crm_cri.EconomicGroups ORDER BY name');
+    res.json(result);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error while fetching economic groups');
@@ -27,30 +25,28 @@ router.get('/', async (req, res) => {
 router.get('/:id/details', async (req, res) => {
     const groupId = req.params.id;
     try {
-        const pool = await getConnection();
-
         // Fetch all data in parallel
         const [groupResult, operationsResult, timelineResult, propertiesResult, reviewResult] = await Promise.all([
-            pool.request().input('id', sql.Int, groupId).query('SELECT * FROM crm_cri.EconomicGroups WHERE id = @id'),
-            pool.request().input('groupId', sql.Int, groupId).query(`
+            executeQuery('SELECT * FROM crm_cri.EconomicGroups WHERE id = ?', [groupId]),
+            executeQuery(`
                 SELECT o.*, t.id as titulo_id, t.operationId as titulo_operationId, t.codigo_cetip, t.indexador, t.taxa, t.rating as titulo_rating, t.vencimento, t.nextPmt as titulo_nextPmt, t.securitizadora, t.agente_fiduciario, t.volume_total
                 FROM crm_cri.Operations o
                 LEFT JOIN crm_cri.Titulos t ON o.id = t.operationId
-                WHERE o.groupId = @groupId
+                WHERE o.groupId = ?
                 ORDER BY o.dueDate DESC
-            `),
-            pool.request().input('groupId', sql.Int, groupId).query('SELECT * FROM crm_cri.TimelineEvents WHERE groupId = @groupId ORDER BY date DESC'),
-            pool.request().input('groupId', sql.Int, groupId).query('SELECT * FROM crm_cri.PropertyGuarantees WHERE groupId = @groupId'),
-            pool.request().input('groupId', sql.Int, groupId).query('SELECT status FROM crm_cri.Reviews WHERE groupId = @groupId')
+            `, [groupId]),
+            executeQuery('SELECT * FROM crm_cri.TimelineEvents WHERE groupId = ? ORDER BY date DESC', [groupId]),
+            executeQuery('SELECT * FROM crm_cri.PropertyGuarantees WHERE groupId = ?', [groupId]),
+            executeQuery('SELECT status FROM crm_cri.Reviews WHERE groupId = ?', [groupId])
         ]);
 
-        if (groupResult.recordset.length === 0) {
+        if (groupResult.length === 0) {
             return res.status(404).json({ msg: 'Group not found' });
         }
         
         // Structure operations with their nested titulos
         const operationsMap = {};
-        operationsResult.recordset.forEach(row => {
+        operationsResult.forEach(row => {
             if (!operationsMap[row.id]) {
                 operationsMap[row.id] = {
                     id: row.id,
@@ -83,11 +79,11 @@ router.get('/:id/details', async (req, res) => {
         const operations = Object.values(operationsMap);
 
         const response = {
-            group: groupResult.recordset[0],
+            group: groupResult[0],
             operations: operations,
-            timeline: timelineResult.recordset,
-            properties: propertiesResult.recordset,
-            review: reviewResult.recordset[0] || { status: 'ok' }
+            timeline: timelineResult,
+            properties: propertiesResult,
+            review: reviewResult[0] || { status: 'ok' }
         };
 
         res.json(response);
@@ -107,28 +103,26 @@ router.post('/:groupId/timeline-events', async (req, res) => {
     const { groupId } = req.params;
     const { title, summary, fullDescription, responsible, type } = req.body;
     
-    // Basic validation
     if (!title || !summary || !fullDescription || !responsible || !type) {
         return res.status(400).json({ msg: 'Please provide all required fields.' });
     }
 
     try {
-        const pool = await getConnection();
-        const result = await pool.request()
-            .input('groupId', sql.Int, groupId)
-            .input('date', sql.Date, new Date())
-            .input('title', sql.NVarChar, title)
-            .input('summary', sql.NVarChar, summary)
-            .input('fullDescription', sql.NVarChar, fullDescription)
-            .input('responsible', sql.NVarChar, responsible)
-            .input('type', sql.NVarChar, type)
-            .query(`
-                INSERT INTO crm_cri.TimelineEvents (groupId, date, title, summary, fullDescription, responsible, type)
-                OUTPUT INSERTED.*
-                VALUES (@groupId, @date, @title, @summary, @fullDescription, @responsible, @type)
-            `);
+        // NOTE: Databricks doesn't have an easy way to return the inserted row like SQL Server's OUTPUT clause.
+        // We will insert and then re-fetch the latest event for that group as a simple workaround.
+        const insertQuery = `
+            INSERT INTO crm_cri.TimelineEvents (groupId, date, title, summary, fullDescription, responsible, type)
+            VALUES (?, CURRENT_DATE(), ?, ?, ?, ?, ?)
+        `;
+        await executeQuery(insertQuery, [groupId, title, summary, fullDescription, responsible, type]);
+
+        // Re-fetch the newly created event
+        const result = await executeQuery(
+            'SELECT * FROM crm_cri.TimelineEvents WHERE groupId = ? ORDER BY id DESC LIMIT 1',
+            [groupId]
+        );
         
-        res.status(201).json(result.recordset[0]);
+        res.status(201).json(result[0]);
 
     } catch (err) {
         console.error(err);
@@ -149,47 +143,33 @@ router.post('/:groupId/watchlist-event', async (req, res) => {
         return res.status(400).json({ msg: 'Please provide all required fields for the watchlist event.' });
     }
 
-    let transaction;
     try {
-        const pool = await getConnection();
-        transaction = new sql.Transaction(pool);
-        await transaction.begin();
-
-        const request = new sql.Request(transaction);
-
         // 1. Update the Economic Group's watchlistStatus
-        await request
-            .input('groupId_update', sql.Int, groupId)
-            .input('newStatus', sql.NVarChar, newStatus)
-            .query('UPDATE crm_cri.EconomicGroups SET watchlistStatus = @newStatus WHERE id = @groupId_update');
+        await executeQuery(
+            'UPDATE crm_cri.EconomicGroups SET watchlistStatus = ? WHERE id = ?',
+            [newStatus, groupId]
+        );
 
         // 2. Insert the new timeline event
         const summary = `Status de watchlist atualizado para: ${newStatus.toUpperCase()}. Motivo: ${title}`;
-        const eventResult = await request
-            .input('groupId_insert', sql.Int, groupId)
-            .input('date', sql.Date, new Date())
-            .input('title', sql.NVarChar, title)
-            .input('summary', sql.NVarChar, summary)
-            .input('fullDescription', sql.NVarChar, fullDescription)
-            .input('responsible', sql.NVarChar, responsible)
-            .input('type', sql.NVarChar, 'watchlist')
-            .query(`
-                INSERT INTO crm_cri.TimelineEvents (groupId, date, title, summary, fullDescription, responsible, type)
-                OUTPUT INSERTED.*
-                VALUES (@groupId_insert, @date, @title, @summary, @fullDescription, @responsible, @type)
-            `);
+        const insertEventQuery = `
+            INSERT INTO crm_cri.TimelineEvents (groupId, date, title, summary, fullDescription, responsible, type)
+            VALUES (?, CURRENT_DATE(), ?, ?, ?, ?, 'watchlist')
+        `;
+        await executeQuery(insertEventQuery, [groupId, title, summary, fullDescription, responsible]);
+        
+        // Re-fetch the newly created event
+        const eventResult = await executeQuery(
+            "SELECT * FROM crm_cri.TimelineEvents WHERE groupId = ? AND type = 'watchlist' ORDER BY id DESC LIMIT 1",
+            [groupId]
+        );
 
-        await transaction.commit();
-        res.status(201).json(eventResult.recordset[0]);
+        res.status(201).json(eventResult[0]);
 
     } catch (err) {
-        if (transaction) {
-            await transaction.rollback();
-        }
-        console.error('Transaction failed:', err);
+        console.error('Operation failed:', err);
         res.status(500).send('Server error during watchlist event creation.');
     }
 });
-
 
 module.exports = router;

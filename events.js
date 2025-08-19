@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const sql = require('mssql');
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 // Map database types to frontend event types and icons
 const ICONS = {
@@ -18,11 +17,10 @@ const ICONS = {
  */
 router.get('/', async (req, res) => {
     try {
-        const pool = await getConnection();
         // Query all event sources. We only fetch future events for the calendar.
-        const result = await pool.request().query(`
+        const result = await executeQuery(`
             SELECT 
-                'rev-' + CAST(r.id AS VARCHAR) as id, 
+                'rev-' || CAST(r.id AS VARCHAR) as id, 
                 r.nextReviewDate as date, 
                 'Revisão' as title, 
                 g.name as groupName, 
@@ -31,12 +29,12 @@ router.get('/', async (req, res) => {
                 '${ICONS.reviews}' as icon 
             FROM crm_cri.Reviews r 
             JOIN crm_cri.EconomicGroups g ON r.groupId = g.id 
-            WHERE r.nextReviewDate >= GETDATE()
+            WHERE r.nextReviewDate >= CURRENT_DATE()
             
             UNION ALL
             
             SELECT 
-                'vis-' + CAST(v.id AS VARCHAR) as id, 
+                'vis-' || CAST(v.id AS VARCHAR) as id, 
                 v.nextVisitDate as date, 
                 'Visita' as title, 
                 g.name as groupName, 
@@ -45,12 +43,12 @@ router.get('/', async (req, res) => {
                 '${ICONS.visits}' as icon 
             FROM crm_cri.Visits v 
             JOIN crm_cri.EconomicGroups g ON v.groupId = g.id 
-            WHERE v.nextVisitDate >= GETDATE()
+            WHERE v.nextVisitDate >= CURRENT_DATE()
             
             UNION ALL
 
             SELECT 
-                'rul-' + CAST(id AS VARCHAR) as id, 
+                'rul-' || CAST(id AS VARCHAR) as id, 
                 nextExecution as date, 
                 name as title, 
                 'Sistema' as groupName, 
@@ -58,12 +56,12 @@ router.get('/', async (req, res) => {
                 'Regra' as type, 
                 '${ICONS.settings}' as icon 
             FROM crm_cri.Rules 
-            WHERE nextExecution >= GETDATE()
+            WHERE nextExecution >= CURRENT_DATE()
 
             UNION ALL
 
             SELECT 
-                'task-' + CAST(t.id AS VARCHAR) as id,
+                'task-' || CAST(t.id AS VARCHAR) as id,
                 t.date,
                 t.title,
                 g.name as groupName,
@@ -72,11 +70,11 @@ router.get('/', async (req, res) => {
                 '${ICONS.task}' as icon
             FROM crm_cri.Tasks t
             JOIN crm_cri.EconomicGroups g ON t.groupId = g.id
-            WHERE t.date >= GETDATE() AND t.status = 'Pendente'
+            WHERE t.date >= CURRENT_DATE() AND t.status = 'Pendente'
 
             ORDER BY date ASC
         `);
-        res.json(result.recordset);
+        res.json(result);
     } catch (err) {
         console.error(err);
         res.status(500).send('Server error while fetching events');
@@ -96,21 +94,19 @@ router.post('/tasks', async (req, res) => {
     }
 
     try {
-        const pool = await getConnection();
-        const result = await pool.request()
-            .input('date', sql.Date, date)
-            .input('groupId', sql.Int, groupId)
-            .input('priority', sql.NVarChar, priority)
-            .input('type', sql.NVarChar, type)
-            .input('responsible', sql.NVarChar, responsible)
-            .input('title', sql.NVarChar, title)
-            .query(`
-                INSERT INTO crm_cri.Tasks (date, groupId, priority, type, responsible, title)
-                OUTPUT INSERTED.*
-                VALUES (@date, @groupId, @priority, @type, @responsible, @title)
-            `);
+        const insertQuery = `
+            INSERT INTO crm_cri.Tasks (date, groupId, priority, type, responsible, title)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        await executeQuery(insertQuery, [date, groupId, priority, type, responsible, title]);
+
+        // Re-fetch the newly created task
+        const result = await executeQuery(
+            'SELECT * FROM crm_cri.Tasks WHERE groupId = ? AND title = ? ORDER BY id DESC LIMIT 1',
+            [groupId, title]
+        );
         
-        res.status(201).json(result.recordset[0]);
+        res.status(201).json(result[0]);
 
     } catch (err) {
         console.error(err);

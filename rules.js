@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getConnection } = require('../config/db');
+const { executeQuery } = require('../config/db');
 
 /**
  * @route   GET /api/rules
@@ -9,9 +9,8 @@ const { getConnection } = require('../config/db');
  */
 router.get('/', async (req, res) => {
   try {
-    const pool = await getConnection();
-    const result = await pool.request().query('SELECT * FROM crm_cri.Rules ORDER BY priority, nextExecution');
-    res.json(result.recordset);
+    const result = await executeQuery('SELECT * FROM crm_cri.Rules ORDER BY priority, nextExecution');
+    res.json(result);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error while fetching rules');
