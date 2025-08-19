@@ -1,0 +1,274 @@
+-- =================================================================      
+-- PARTE 1: CRIAÇÃO DO SCHEMA E DAS TABELAS
+-- Garante que o schema 'crm_cri' exista e recria todas as tabelas
+-- dentro dele para um estado limpo.
+-- =================================================================
+
+-- Cria o schema se ele não existir
+IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'crm_cri')
+BEGIN
+    EXEC('CREATE SCHEMA crm_cri');
+END
+GO
+
+-- Drop tables in reverse order of creation to avoid foreign key constraints issues
+IF OBJECT_ID('crm_cri.PropertyGuarantees', 'U') IS NOT NULL DROP TABLE crm_cri.PropertyGuarantees;
+IF OBJECT_ID('crm_cri.Appraisals', 'U') IS NOT NULL DROP TABLE crm_cri.Appraisals;
+IF OBJECT_ID('crm_cri.Insurances', 'U') IS NOT NULL DROP TABLE crm_cri.Insurances;
+IF OBJECT_ID('crm_cri.Visits', 'U') IS NOT NULL DROP TABLE crm_cri.Visits;
+IF OBJECT_ID('crm_cri.Reviews', 'U') IS NOT NULL DROP TABLE crm_cri.Reviews;
+IF OBJECT_ID('crm_cri.Rules', 'U') IS NOT NULL DROP TABLE crm_cri.Rules;
+IF OBJECT_ID('crm_cri.TimelineEvents', 'U') IS NOT NULL DROP TABLE crm_cri.TimelineEvents;
+IF OBJECT_ID('crm_cri.Titulos', 'U') IS NOT NULL DROP TABLE crm_cri.Titulos;
+IF OBJECT_ID('crm_cri.Operations', 'U') IS NOT NULL DROP TABLE crm_cri.Operations;
+IF OBJECT_ID('crm_cri.Tasks', 'U') IS NOT NULL DROP TABLE crm_cri.Tasks;
+IF OBJECT_ID('crm_cri.EconomicGroups', 'U') IS NOT NULL DROP TABLE crm_cri.EconomicGroups;
+
+
+GO
+
+-- Tabela Principal: EconomicGroups
+CREATE TABLE crm_cri.EconomicGroups (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    name NVARCHAR(255) NOT NULL,
+    description NVARCHAR(MAX),
+    watchlistStatus NVARCHAR(50) CHECK (watchlistStatus IN ('ok', 'attention', 'problem', 'critical')),
+    currentVolume DECIMAL(18, 2),
+    insuranceStatus NVARCHAR(50) CHECK (insuranceStatus IN ('ok', 'attention', 'problem', 'critical')),
+    visitStatus NVARCHAR(50) CHECK (visitStatus IN ('ok', 'attention', 'problem', 'critical')),
+    nextReviewDate DATE,
+    rating NVARCHAR(10),
+    covenantsStatus NVARCHAR(50) CHECK (covenantsStatus IN ('ok', 'attention', 'problem', 'critical'))
+);
+GO
+
+-- Tabela: Tasks
+CREATE TABLE crm_cri.Tasks (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    date DATE NOT NULL,
+    title NVARCHAR(255) NOT NULL,
+    groupId INT NOT NULL,
+    type NVARCHAR(50) CHECK (type IN ('Reunião', 'Documento', 'Visita', 'Outros')),
+    priority NVARCHAR(50) CHECK (priority IN ('Alta', 'Média', 'Baixa')),
+    responsible NVARCHAR(100),
+    status NVARCHAR(50) DEFAULT 'Pendente' CHECK (status IN ('Pendente', 'Concluída')),
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: Operations
+CREATE TABLE crm_cri.Operations (
+    id NVARCHAR(50) PRIMARY KEY,
+    groupId INT NOT NULL,
+    description NVARCHAR(MAX),
+    volume DECIMAL(18, 2),
+    rating NVARCHAR(10),
+    dueDate DATE,
+    nextPmt DATE,
+    guarantees NVARCHAR(255),
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: Titulos
+CREATE TABLE crm_cri.Titulos (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    operationId NVARCHAR(50) NOT NULL,
+    codigo_cetip NVARCHAR(50),
+    indexador NVARCHAR(50),
+    taxa NVARCHAR(50),
+    rating NVARCHAR(10),
+    vencimento DATE,
+    nextPmt DATE,
+    securitizadora NVARCHAR(100),
+    agente_fiduciario NVARCHAR(100),
+    volume_total DECIMAL(18, 2),
+    FOREIGN KEY (operationId) REFERENCES crm_cri.Operations(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: TimelineEvents
+CREATE TABLE crm_cri.TimelineEvents (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    groupId INT NOT NULL,
+    date DATE,
+    title NVARCHAR(255),
+    summary NVARCHAR(500),
+    fullDescription NVARCHAR(MAX),
+    responsible NVARCHAR(100),
+    type NVARCHAR(50) CHECK (type IN ('reunião', 'documento', 'visita', 'outros', 'watchlist')),
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: Rules
+CREATE TABLE crm_cri.Rules (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    name NVARCHAR(255),
+    nextExecution DATE,
+    description NVARCHAR(MAX),
+    frequency NVARCHAR(50),
+    priority NVARCHAR(50) CHECK (priority IN ('Alta', 'Média', 'Baixa')),
+    status NVARCHAR(50) CHECK (status IN ('Ativa', 'Inativa'))
+);
+GO
+
+-- Tabela: Reviews
+CREATE TABLE crm_cri.Reviews (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    groupId INT NOT NULL,
+    rating NVARCHAR(10),
+    lastReviewDate DATE,
+    nextReviewDate DATE,
+    status NVARCHAR(50) CHECK (status IN ('ok', 'attention', 'problem', 'critical')),
+    responsible NVARCHAR(100),
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: Visits
+CREATE TABLE crm_cri.Visits (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    groupId INT NOT NULL,
+    properties NVARCHAR(MAX),
+    lastVisitDate DATE,
+    nextVisitDate DATE,
+    frequency NVARCHAR(50),
+    status NVARCHAR(50) CHECK (status IN ('Em dia', 'Agendada', 'Atrasada')),
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: Insurances
+CREATE TABLE crm_cri.Insurances (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    groupId INT NOT NULL,
+    operationId NVARCHAR(50) NOT NULL,
+    property NVARCHAR(255),
+    insurer NVARCHAR(100),
+    value DECIMAL(18, 2),
+    expirationDate DATE,
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id),
+    FOREIGN KEY (operationId) REFERENCES crm_cri.Operations(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: Appraisals
+CREATE TABLE crm_cri.Appraisals (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    groupId INT NOT NULL,
+    operationId NVARCHAR(50) NOT NULL,
+    property NVARCHAR(255),
+    appraiser NVARCHAR(100),
+    value DECIMAL(18, 2),
+    date DATE,
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id),
+    FOREIGN KEY (operationId) REFERENCES crm_cri.Operations(id) ON DELETE CASCADE
+);
+GO
+
+-- Tabela: PropertyGuarantees
+CREATE TABLE crm_cri.PropertyGuarantees (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    groupId INT NOT NULL,
+    operationId NVARCHAR(50) NOT NULL,
+    propertyName NVARCHAR(255),
+    address NVARCHAR(500),
+    lastAppraisalValue DECIMAL(18, 2),
+    guaranteeType NVARCHAR(50),
+    lastVisitDate DATE,
+    lastAppraisalDate DATE,
+    appraisalFrequency NVARCHAR(50),
+    visitFrequency NVARCHAR(50),
+    FOREIGN KEY (groupId) REFERENCES crm_cri.EconomicGroups(id),
+    FOREIGN KEY (operationId) REFERENCES crm_cri.Operations(id) ON DELETE CASCADE
+);
+GO
+
+PRINT 'Estrutura de tabelas criada com sucesso no schema crm_cri!';
+GO
+
+
+-- =================================================================      
+-- PARTE 2: INSERÇÃO DE DADOS INICIAIS (MOCK DATA)
+-- =================================================================
+
+-- Inserir EconomicGroups
+INSERT INTO crm_cri.EconomicGroups (name, description, watchlistStatus, currentVolume, insuranceStatus, visitStatus, nextReviewDate, rating, covenantsStatus) VALUES
+('Grupo Alfa', 'Grupo consolidado no setor de agronegócio, com foco na produção e exportação de soja e milho. Possui mais de 50 anos de história e forte presença no mercado internacional.', 'ok', 12500000, 'ok', 'ok', '2024-09-15', 'AAA', 'ok'),
+('Empresa Beta', 'Empresa de médio porte do setor de varejo, especializada em eletrônicos e bens de consumo. Em fase de expansão nacional com abertura de 10 novas lojas no último ano.', 'problem', 8200000, 'critical', 'attention', '2024-08-20', 'AA-', 'ok'),
+('Holdings Gama', 'Holding de investimentos com participação em empresas de tecnologia e energia renovável. Reconhecida por sua gestão inovadora e foco em sustentabilidade.', 'ok', 25000000, 'ok', 'ok', '2024-11-01', 'A+', 'attention'),
+('Consórcio Delta', 'Consórcio de construção civil, focado em obras de infraestrutura de grande porte. Atualmente enfrenta desafios de fluxo de caixa devido a atrasos em pagamentos governamentais.', 'critical', 4500000, 'attention', 'ok', '2024-07-30', 'B', 'critical'),
+('Investimentos Épsilon', 'Fundo de investimento imobiliário (FII) com portfólio diversificado de ativos, incluindo lajes corporativas, galpões logísticos e shoppings.', 'ok', 15000000, 'ok', 'ok', '2025-01-10', 'AAA', 'ok');
+GO
+
+-- Inserir Operations
+INSERT INTO crm_cri.Operations (id, groupId, description, volume, rating, dueDate, nextPmt, guarantees) VALUES
+('102.812.333-4', 1, 'CRI para financiamento de capital de giro para a safra 2024/2025, lastreado em Cédulas de Produto Rural Financeira (CPR-F).', 5000000, 'AAA', '2026-05-20', '2024-08-15', 'Recebíveis'),
+('102.812.456-7', 1, 'CRI lastreado em contratos de aluguel de longo prazo (BTS - Built-to-Suit) para a construção da nova sede administrativa do grupo.', 7500000, 'AA+', '2025-11-10', '2024-08-10', 'Imóveis'),
+('102.333.444-5', 2, 'Operação de Capital de Giro para Expansão', 8200000, 'AA-', '2027-01-01', '2024-08-25', 'Recebíveis'),
+('102.111.222-3', 4, 'Financiamento de Obra Pública', 4500000, 'B', '2025-03-15', '2024-08-30', 'Imóveis'),
+('102.555.666-7', 3, 'Investimento em Startup de Energia', 10000000, 'A+', '2028-06-01', '2024-09-01', 'Cotas de Fundo');
+GO
+
+-- Inserir Titulos
+INSERT INTO crm_cri.Titulos (operationId, codigo_cetip, indexador, taxa, rating, vencimento, nextPmt, securitizadora, agente_fiduciario, volume_total) VALUES
+('102.812.333-4', '2100A4B7C', 'CDI', '110%', 'AAA', '2026-05-20', '2024-08-15', 'Habitasec', 'Oliveira Trust', 2500000),
+('102.812.333-4', '2100A4B7D', 'CDI', '110%', 'AAA', '2026-05-20', '2024-08-15', 'Habitasec', 'Oliveira Trust', 2500000),
+('102.812.456-7', '3300E8F9G', 'IPCA', '+ 6.5%', 'AA+', '2025-11-10', '2024-08-10', 'Vert', 'Vórtx', 7500000);
+GO
+
+-- Inserir TimelineEvents
+INSERT INTO crm_cri.TimelineEvents (groupId, date, title, summary, fullDescription, responsible, type) VALUES
+(1, '2024-07-20', 'Reunião de Acompanhamento', 'Discussão sobre performance do Q2.', 'Reunião com a diretoria para discutir a performance do segundo trimestre de 2024 e os planos para o Q3.', 'João Silva', 'reunião'),
+(1, '2024-07-15', 'Recebimento de Documentação', 'Balanço do Q2 recebido e arquivado.', 'A documentação contábil referente ao segundo trimestre foi recebida.', 'Ana Costa', 'documento'),
+(1, '2024-06-30', 'Visita Técnica Realizada', 'Inspeção das garantias imobiliárias.', 'Visita realizada aos imóveis listados como garantia.', 'Carlos Pereira', 'visita');
+GO
+
+-- Inserir Rules
+INSERT INTO crm_cri.Rules (name, nextExecution, description, frequency, priority, status) VALUES
+('Verificar Apólice de Seguro', '2024-08-01', 'Garantir que a apólice de seguro para as garantias esteja ativa e com cobertura adequada.', 'Mensal', 'Alta', 'Ativa'),
+('Analisar Balancete Mensal', '2024-08-10', 'Receber e analisar o balancete contábil para monitorar a saúde financeira.', 'Mensal', 'Média', 'Ativa'),
+('Revisão de Covenants', '2024-09-01', 'Checar o cumprimento de todos os covenants financeiros e não financeiros.', 'Trimestral', 'Alta', 'Ativa');
+GO
+
+-- Inserir Reviews
+INSERT INTO crm_cri.Reviews (groupId, rating, lastReviewDate, nextReviewDate, status, responsible) VALUES
+(1, 'AAA', '2023-09-15', '2024-09-15', 'ok', 'Ana Costa'),
+(2, 'AA-', '2023-08-20', '2024-08-20', 'ok', 'João Silva'),
+(4, 'B', '2023-07-30', '2024-07-30', 'critical', 'Carlos Pereira'),
+(3, 'A+', '2023-11-01', '2024-11-01', 'ok', 'Ana Costa');
+GO
+
+-- Inserir Visits
+INSERT INTO crm_cri.Visits (groupId, properties, lastVisitDate, nextVisitDate, frequency, status) VALUES
+(1, 'Sede Administrativa', '2024-01-20', '2025-01-20', 'Anual', 'Em dia'),
+(2, 'Parque Fabril', '2024-05-10', '2024-11-10', 'Semestral', 'Em dia'),
+(4, 'Galpão Logístico', '2023-06-15', '2024-06-15', 'Anual', 'Atrasada'),
+(3, 'Sede, Filial SP', '2024-02-28', '2025-02-28', 'Anual', 'Em dia');
+GO
+
+-- Inserir Insurances
+INSERT INTO crm_cri.Insurances (groupId, operationId, property, insurer, value, expirationDate) VALUES
+(1, '102.812.456-7', 'Sede Administrativa', 'Porto Seguro', 10000000, '2025-06-30'),
+(4, '102.111.222-3', 'Galpão Logístico', 'Allianz', 5000000, '2024-09-15'),
+(2, '102.333.444-5', 'Parque Fabril', 'Tokio Marine', 8000000, '2024-08-25'),
+(3, '102.555.666-7', 'Sede, Filial SP', 'Bradesco Seguros', 20000000, '2024-07-29');
+GO
+
+-- Inserir Appraisals
+INSERT INTO crm_cri.Appraisals (groupId, operationId, property, appraiser, value, date) VALUES
+(1, '102.812.456-7', 'Sede Administrativa', 'CBRE', 15000000, '2024-01-10'),
+(4, '102.111.222-3', 'Galpão Logístico', 'JLL', 6000000, '2022-10-01'),
+(3, '102.555.666-7', 'Sede, Filial SP', 'Cushman & Wakefield', 30000000, '2022-03-20');
+GO
+
+-- Inserir PropertyGuarantees
+INSERT INTO crm_cri.PropertyGuarantees (groupId, operationId, propertyName, address, lastAppraisalValue, guaranteeType, lastVisitDate, lastAppraisalDate, appraisalFrequency, visitFrequency) VALUES
+(1, '102.812.456-7', 'Sede Administrativa', 'Av. Paulista, 1000, São Paulo - SP', 15000000, 'AF', '2024-01-20', '2024-01-10', 'Bienal', 'Anual'),
+(2, '102.333.444-5', 'Parque Fabril', 'Rod. Anhanguera, km 50, Jundiaí - SP', 9500000, 'AF', '2024-05-10', '2023-11-20', 'Bienal', 'Semestral'),
+(4, '102.111.222-3', 'Galpão Logístico', 'Rua das Indústrias, 500, Itapevi - SP', 6000000, 'CF', '2023-06-15', '2022-10-01', 'Anual', 'Anual');
+GO
+
+PRINT 'Dados de exemplo inseridos com sucesso no schema crm_cri!';
+GO
